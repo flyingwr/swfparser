@@ -268,7 +268,7 @@ class ABCParser:
 		elif kind_tag in (TRAIT_METHOD, TRAIT_GETTER, TRAIT_SETTER, TRAIT_CLASS):
 			trait['disp_id']     = self.reader.read_leb128()
 			trait['index']       = self.reader.read_leb128()
-		elif kind_tag == TRAIT_FUNCTION:  # Function
+		elif kind_tag == TRAIT_FUNCTION:
 			trait['disp_id']     = self.reader.read_leb128()
 			trait['index']       = self.reader.read_leb128()
 		
@@ -277,14 +277,19 @@ class ABCParser:
 			trait['metadata'] = [self.reader.read_leb128() for _ in range(meta_count)]
 		return trait
 	
-	def _assemble_instructions(instrs: list[Instruction]) -> bytes:
+	@staticmethod
+	def assemble_instructions(stack: Stack) -> bytes:
 		writer = ByteWriter()
-		for ins in instrs:
-			_opcode = Opcode(ins.opcode)
+		while True:
+			instr = stack.next()
+			if instr is None:
+				break
+
+			_opcode = Opcode(instr.opcode)
 			if _opcode is None:
-				raise ValueError(f"Unknwon Opcode on assembly: 0x{ins.opcode:02x}")
+				raise ValueError(f"Unknwon Opcode on assembly: 0x{instr.opcode:02x}")
 			
-			writer.write_ui8(ins.opcode)
+			writer.write_ui8(instr.opcode)
 
 			arg_types = []
 
@@ -292,7 +297,7 @@ class ABCParser:
 			if len(opcode_val) > 1:
 				arg_types.extend(opcode_val[1:])
 
-			for arg, t in zip(ins.args, arg_types):
+			for arg, t in zip(instr.args, arg_types):
 				match t:
 					case "u30":
 						writer.write_leb128(arg)
@@ -318,7 +323,7 @@ class ABCParser:
 		return bytes(writer.buf)
 
 	@staticmethod	
-	def _read_instructions(code: bytes) -> Stack:
+	def read_instructions(code: bytes) -> Stack:
 		reader = ByteReader(code)
 		stack = Stack()
 		while reader.pos < len(code):
