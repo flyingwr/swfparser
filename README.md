@@ -1,0 +1,1 @@
+Minimalist SWF parser made for a personal project to perform AVM2 bytecode disassembling
