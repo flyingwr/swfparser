@@ -44,22 +44,21 @@ class ByteReader:
 
         return result
 
-    def read_sleb128(self) -> int:
+    def read_sleb128(self) -> int: # S32
         result = 0
         shift = 0
 
         while True:
             byte = self.read_u8()
 
-            result |= (byte & 0x7F) << shift
-
+            result |= ((byte & 0x7F) << shift)
             shift += 7
 
-            cont = byte & 0x80
-            if not cont:
-                if (byte & 0x40) != 0 and shift < 32:
-                    result |= - (1 << shift)
+            if not (byte & 0x80) or shift == 35:
                 break
+
+        if result & (1 << 31):
+            result -= 1 << 32
 
         return result
     
