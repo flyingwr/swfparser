@@ -1,57 +1,29 @@
+from ..reader import ByteReader
+
 from .consts import *
 from .instruction import Instruction, Opcode, Stack
-from .reader import ByteReader
-from .writer import ByteWriter
 
-import struct
-
-class ABCParser:
+class ABCReader:
 	def __init__(self, data: bytes):
-		self.reader = ByteReader(data)
+		self.reader: ByteReader = ByteReader(data)
 
-		self.method_info = []
-		self.metadata = []
-		self.instance_pool = []
-		self.class_pool = []
-		self.script_pool = []
-		self.method_bodies = []
+	def read(self):
+		self.minor_version = self.reader.read_u16()
+		self.major_version = self.reader.read_u16()
 
-	def parse(self):
-		self.reader.read_u16() # minor
-		self.reader.read_u16() # major
+		self._read_constant_pool()
+		self._read_method_info()
+		self._read_metadata()
+		self._read_instances_and_classes()
+		self._read_scripts()
+		self._read_method_bodies()
 
-		self._parse_constant_pool()
-		self._parse_method_info()
-		self._parse_metadata()
-		self._parse_instances_and_classes()
-		self._parse_scripts()
-		self._parse_method_bodies()
-
-	def __repr__(self) -> str:
-		return (
-			f"ABCParser constantpool: ints={len(self.int_pool)}, uints={len(self.uint_pool)}, \
-"
-			f"doubles={len(self.double_pool)}, strings={len(self.string_pool)}, \
-"
-			f"namespaces={len(self.namespace_pool)}, ns_sets={len(self.ns_set_pool)}, \
-"
-			f"multinames={len(self.multiname_pool)}, methods={len(self.method_info)}, \
-"
-			f"metadata={len(self.metadata)}, instances={len(self.instance_pool)}, \
-"
-			f"classes={len(self.class_pool)}, scripts={len(self.script_pool)}, \
-"
-			f"method_bodies={len(self.method_bodies)}"
-		)
-
-	def _parse_constant_pool(self):		
+	def _read_constant_pool(self):
 		int_count = self.reader.read_leb128()
 		self.int_pool = [0]
 		for _ in range(int_count - 1):
 			self.int_pool.append(self.reader.read_sleb128())
-
-		print(self.reader.buf[self.reader.pos:self.reader.pos + 256])
-
+		
 		uint_count = self.reader.read_leb128()
 		self.uint_pool = [0]
 		for _ in range(uint_count - 1):
@@ -60,8 +32,7 @@ class ABCParser:
 		double_count = self.reader.read_leb128()
 		self.double_pool = [0.0]
 		for _ in range(double_count - 1):
-			raw = self.reader.read_bytes(8)
-			self.double_pool.append(struct.unpack('<d', raw)[0])
+			self.double_pool.append(self.reader.read_d())
 
 		string_count = self.reader.read_leb128()
 		self.string_pool = [""]
@@ -69,7 +40,10 @@ class ABCParser:
 			self.string_pool.append(self.reader.read_string())
 
 		ns_count = self.reader.read_leb128()
-		self.namespace_pool = [None]
+		self.namespace_pool = [{
+			"kind": 0,
+			"name_index": 0
+		}]
 		for _ in range(ns_count - 1):
 			kind = self.reader.read_u8()
 			name_index = self.reader.read_leb128()
@@ -86,7 +60,10 @@ class ABCParser:
 			self.ns_set_pool.append(indices)
 
 		multiname_count = self.reader.read_leb128()
-		self.multiname_pool = [None]
+		self.multiname_pool = [{
+			"kind": CONSTANT_QName,
+			"name_index": 0
+		}]
 		for _ in range(multiname_count - 1):
 			kind = self.reader.read_u8()
 			entry = {'kind': kind}
@@ -111,7 +88,7 @@ class ABCParser:
 				raise ValueError(f"Unknown multiname kind: {kind}")
 			self.multiname_pool.append(entry)
 
-	def _parse_method_info(self):
+	def _read_method_info(self):
 		count = self.reader.read_leb128()
 		for _ in range(count):
 			param_count = self.reader.read_leb128()
@@ -124,11 +101,10 @@ class ABCParser:
 
 			entry = {
 				"name": name,
-				"flags": flags,
 				"params": params,
 				"return_type": return_type
 			}
-
+			
 			if flags & HAS_OPTIONAL:
 				option_count = self.reader.read_leb128()
 
@@ -141,15 +117,15 @@ class ABCParser:
 				entry["optional_params"] = optional_params
 
 			if flags & HAS_PARAM_NAMES:
-				# ignore param names, their entries are not used by AVM2
+				# ignore param names: their entries are not used by AVM2
 				for _ in range(param_count):
 					self.reader.read_leb128()
 
 				flags &= ~HAS_PARAM_NAMES
-
+			entry["flags"] = flags
 			self.method_info.append(entry)
 
-	def _parse_metadata(self):
+	def _read_metadata(self):
 		count = self.reader.read_leb128()
 		for _ in range(count):
 			name_idx = self.reader.read_leb128()
@@ -169,7 +145,7 @@ class ABCParser:
 				'entries': entries
 			})
 
-	def _parse_instances_and_classes(self):
+	def _read_instances_and_classes(self):
 		count = self.reader.read_leb128()
 		for _ in range(count):
 			name_idx = self.reader.read_leb128()
@@ -185,7 +161,7 @@ class ABCParser:
 			iinit = self.reader.read_leb128()
 			
 			trait_count = self.reader.read_leb128()
-			traits = [self._parse_trait() for _ in range(trait_count)]
+			traits = [self._read_trait() for _ in range(trait_count)]
 			self.instance_pool.append({
 				'name':   self.multiname_pool[name_idx],
 				'super':  self.multiname_pool[super_idx],
@@ -200,24 +176,24 @@ class ABCParser:
 		for _ in range(count):
 			cinit = self.reader.read_leb128()
 			trait_count = self.reader.read_leb128()
-			traits = [self._parse_trait() for _ in range(trait_count)]
+			traits = [self._read_trait() for _ in range(trait_count)]
 			self.class_pool.append({
 				'cinit': cinit,
 				'traits': traits
 			})
 
-	def _parse_scripts(self):
+	def _read_scripts(self):
 		script_count = self.reader.read_leb128()
 		for _ in range(script_count):
-			init = self.method_info[self.reader.read_leb128()]
+			init = self.reader.read_leb128()
 			trait_count = self.reader.read_leb128()
-			traits = [self._parse_trait() for _ in range(trait_count)]
+			traits = [self._read_trait() for _ in range(trait_count)]
 			self.script_pool.append({
 				'init': init,
 				'traits': traits
 			})
 
-	def _parse_method_bodies(self):
+	def _read_method_bodies(self):
 		body_count = self.reader.read_leb128()
 		for _ in range(body_count):
 			method_idx  = self.reader.read_leb128()
@@ -240,7 +216,7 @@ class ABCParser:
 				})
 			
 			trait_count = self.reader.read_leb128()
-			traits = [self._parse_trait() for _ in range(trait_count)]
+			traits = [self._read_trait() for _ in range(trait_count)]
 
 			self.method_bodies.append({
 				'method_index': method_idx,
@@ -253,7 +229,7 @@ class ABCParser:
 				'traits':       traits
 			})
 
-	def _parse_trait(self):
+	def _read_trait(self):
 		name_idx = self.reader.read_leb128()
 		kind     = self.reader.read_u8()
 		trait = {'name': self.multiname_pool[name_idx], 'kind': kind}
@@ -273,70 +249,27 @@ class ABCParser:
 			trait['index']       = self.reader.read_leb128()
 		
 		if (kind >> 4) & 0x04:
+			# ignore metadata
 			meta_count = self.reader.read_leb128()
-			trait['metadata'] = [self.reader.read_leb128() for _ in range(meta_count)]
+			for _ in range(meta_count):
+				self.reader.read_leb128()
+
 		return trait
 	
-	@staticmethod
-	def assemble_instructions(stack: Stack) -> bytes:
-		writer = ByteWriter()
-		while True:
-			instr = stack.next()
-			if instr is None:
-				break
-
-			_opcode = Opcode(instr.opcode)
-			if _opcode is None:
-				raise ValueError(f"Unknwon Opcode on assembly: 0x{instr.opcode:02x}")
-			
-			writer.write_ui8(instr.opcode)
-
-			arg_types = []
-
-			opcode_val = _opcode.value
-			if len(opcode_val) > 1:
-				arg_types.extend(opcode_val[1:])
-
-			for arg, t in zip(instr.args, arg_types):
-				match t:
-					case "u30":
-						writer.write_leb128(arg)
-					case "u8":
-						writer.write_ui8(arg)
-					case "u16":
-						writer.write_ui16(arg)
-					case "u32":
-						writer.write_ui32(arg)
-					case "s24":
-						writer.write_s24(arg)
-					case "s24arr":
-						default_offset, case_offsets = arg
-						writer.write_s24(default_offset)
-
-						case_count = len(case_offsets)
-						writer.write_leb128(case_count)
-
-						for offset in case_offsets:
-							writer.write_s24(offset)
-					case _:
-						raise ValueError(f"Unknwon arg type for assembly: {t}")
-		return bytes(writer.buf)
-
 	@staticmethod	
 	def read_instructions(code: bytes) -> Stack:
 		reader = ByteReader(code)
-		stack = Stack()
+		stack = Stack(code_len=len(code))
+
 		while reader.pos < len(code):
 			opcode = reader.read_u8()
 			_opcode = Opcode(opcode)
 			if _opcode is None:
-				raise ValueError(f"Unknown opcode on parse: 0x{opcode:02x}")
+				raise ValueError(f"Unknown opcode on read: 0x{opcode:02x}")
 			
 			arg_types = []
-
-			opcode_val = _opcode.value
-			if len(opcode_val) > 1:
-				arg_types.extend(opcode_val[1:])
+			if len(_opcode.value) > 1:
+				arg_types.extend(_opcode.value[1:])
 
 			args = []
 			for t in arg_types:
@@ -347,18 +280,31 @@ class ABCParser:
 						args.append(reader.read_u8())
 					case "u16":
 						args.append(reader.read_u16())
+					case "s24":
+						op_off = reader.pos
+						target = reader.read_s24()
+
+						if _opcode.name == "lookupswitch":
+							stack.targets.append(op_off + target)
+						else:
+							stack.targets.append(target + reader.pos)
+
+						args.append(target)
+					case "s24arr":
+						op_off = reader.pos
+
+						case_count = reader.read_leb128() + 1
+						case_offsets = [reader.read_s24() for _ in range(case_count)]
+
+						stack.targets.extend([op_off + offset for offset in case_offsets])
+
+						args.append(case_offsets)
 					case "u32":
 						args.append(reader.read_u32())
-					case "s24":
-						args.append(reader.read_s24())
-					case "s24arr":
-						default_offset = reader.reads24()
-
-						case_count = reader.read_leb128()
-						case_offsets = [reader.read_s24() for _ in range(case_count)]
-						args.append((default_offset, case_offsets))
+					case "s32":
+						args.append(reader.read_sleb128())
 					case _:
 						raise ValueError(f"Unknown arg type: {t}")
 				
-			stack.add(Instruction(_opcode.name, opcode, args))
+			stack.add(Instruction(_opcode, args))
 		return stack
