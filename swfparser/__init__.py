@@ -1,5 +1,7 @@
-from ._abc import ABCParser
-from .consts import *
-from .swf import SWFParser
+from ._abc import ABC
+from ._abc.consts import *
 
 from .reader import ByteReader
+from .writer import ByteWriter
+
+from .swf import SWFParser
