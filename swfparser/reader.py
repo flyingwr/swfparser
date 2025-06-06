@@ -16,7 +16,7 @@ class ByteReader:
 		return val
 	
 	def read_s24(self) -> int:
-		return int.from_bytes(self.read_bytes(3), "little")
+		return int.from_bytes(self.read_bytes(3), "little", signed=True)
 
 	def read_u32(self) -> int:
 		val = struct.unpack_from('<I', self.buf, self.pos)[0]
