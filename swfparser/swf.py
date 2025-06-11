@@ -2,8 +2,6 @@ from ._abc import ABC
 from .reader import ByteReader
 from .writer import ByteWriter
 
-from concurrent.futures import ProcessPoolExecutor
-
 import struct
 import zlib
 
