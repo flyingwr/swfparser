@@ -4,6 +4,9 @@ class ByteWriter:
     def __init__(self):
         self.buf = bytearray()
 
+    def __len__(self):
+        return len(self.buf)
+
     def clear(self):
         self.buf *= 0
 
@@ -16,7 +19,7 @@ class ByteWriter:
         return self
     
     def write_s24(self, v: int) -> 'ByteWriter':
-        self.buf.extend((v & 0xFFFFFF).to_bytes(3, "little"))
+        self.buf.extend((v & 0xFFFFFF).to_bytes(3, "little", signed=True))
         return self
 
     def write_u32(self, v: int) -> 'ByteWriter':
@@ -27,18 +30,20 @@ class ByteWriter:
         self.buf.extend(struct.pack("<d", v))
         return self
 
-    def write_bytes(self, b: bytes) -> 'ByteWriter':
+    def write_bytes(self, b: bytes | bytearray | memoryview) -> 'ByteWriter':
         self.buf.extend(b)
         return self
     
     def write_leb128(self, v: int) -> 'ByteWriter':
+        b_append = self.buf.append
+
         while True:
             byte = v & 0x7F
             v >>= 7
-            if (v == 0):
-                self.buf.append(byte)
+            if v == 0:
+                b_append(byte)
                 break
-            self.buf.append(byte | 0x80)
+            b_append(byte | 0x80)
         return self
     
     def write_sleb128(self, v: int) -> 'ByteWriter': # S32
