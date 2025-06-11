@@ -3,9 +3,12 @@ from enum import Enum
 
 @dataclass
 class Instruction:
-    opcode: 'Opcode'
+    opcode: "Opcode"
     
+    address: int = -1
+
     args: list[int] = field(default_factory=lambda: [])
+    targets: list[int] = field(default_factory=lambda: [])
 
     def __repr__(self):
         return f"Instruction(name='{self.opcode.name}', opcode=0x{self.opcode.value[0]:02x}, args={self.args})"
@@ -18,7 +21,6 @@ class Stack:
     index: int = -1
 
     instructions: list[Instruction] = field(default_factory=lambda: [])
-    targets: list[int] = field(default_factory=lambda: [])
 
     def add(self, instr: Instruction):
         self.instructions.append(instr)
@@ -39,7 +41,7 @@ class Stack:
         self.current_instruction = self.instructions[self.index]
         return self.current_instruction
     
-    def reset(self) -> 'Stack':
+    def reset(self) -> "Stack":
         self.index = -1
         self.current_instruction = None
         return self
@@ -226,7 +228,7 @@ class Opcode(Enum):
     unknown_7d = 0x7d,
 
     @classmethod
-    def _missing_(cls, key) -> 'Opcode':
+    def _missing_(cls, key) -> "Opcode":
         if isinstance(key, int):
             for member in cls:
                 if member.value[0] == key:
@@ -237,3 +239,13 @@ class Opcode(Enum):
             if member.name == key:
                 return member
         return None
+    
+    @classmethod
+    def from_code(cls, code: int) -> "Opcode":
+        try:
+            return CODE_TO_OPCODE[code]
+        except KeyError:
+            CODE_TO_OPCODE[code] = member = cls._missing_(code)
+            return member
+    
+CODE_TO_OPCODE = {m.value[0]: m for m in Opcode}

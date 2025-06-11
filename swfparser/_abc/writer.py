@@ -62,7 +62,7 @@ class ABCWriter:
 			kind = multiname["kind"]
 			self.writer.write_u8(kind)
 			if kind in (CONSTANT_QName, CONSTANT_QNameA):
-				self.writer.write_leb128(multiname["ns_index"])
+				self.writer.write_leb128(multiname.get("ns_index"))
 				self.writer.write_leb128(multiname["name_index"])
 			elif kind in (CONSTANT_RTQName, CONSTANT_RTQNameA):
 				self.writer.write_leb128(multiname["name_index"])
@@ -86,12 +86,13 @@ class ABCWriter:
 		self.writer.write_leb128(len(self.method_info))
 		for method in self.method_info:
 			self.writer.write_leb128(len(method["params"]))
-			self.writer.write_leb128(self.multiname_pool.index(method["return_type"]))
+
+			self.writer.write_leb128(self._multiname_id_index[id(method["return_type"])])
 
 			for param in method["params"]:
-				self.writer.write_leb128(self.multiname_pool.index(param))
+				self.writer.write_leb128(self._multiname_id_index[id(param)])
 
-			self.writer.write_leb128(self.string_pool.index(method["name"], 1))
+			self.writer.write_leb128(self._str_index[method["name"]])
 			self.writer.write_u8(method["flags"])
 
 			if method["flags"] & HAS_OPTIONAL:
@@ -104,8 +105,9 @@ class ABCWriter:
 	def _write_instances_and_classes(self):
 		self.writer.write_leb128(len(self.class_pool))
 		for instance in self.instance_pool:
-			self.writer.write_leb128(self.multiname_pool.index(instance["name"]))
-			self.writer.write_leb128(self.multiname_pool.index(instance["super"]))
+			self.writer.write_leb128(self._multiname_id_index[id(instance["name"])])
+
+			self.writer.write_leb128(self._multiname_id_index[id(instance["super"])])
 
 			self.writer.write_u8(instance["flags"])
 			if instance["protected_ns"] is not None:
@@ -113,7 +115,7 @@ class ABCWriter:
 
 			self.writer.write_leb128(len(instance["interfaces"]))
 			for interface in instance["interfaces"]:
-				self.writer.write_leb128(self.multiname_pool.index(interface))
+				self.writer.write_leb128(self._multiname_id_index[id(interface)])
 
 			self.writer.write_leb128(instance["iinit"])
 			self._write_traits(instance["traits"])
@@ -130,23 +132,25 @@ class ABCWriter:
 			self._write_traits(script["traits"])
 
 	def _write_method_bodies(self):
-		self.writer.write_leb128(len(self.method_bodies))
-		for body in self.method_bodies:
-			self.writer.write_leb128(body["method_index"])
-			self.writer.write_leb128(body["max_stack"])
-			self.writer.write_leb128(body["local_count"])
-			self.writer.write_leb128(body["init_scope"])
-			self.writer.write_leb128(body["max_scope"])
-			self.writer.write_leb128(len(body["code"]))
-			self.writer.write_bytes(body["code"])
+		w = self.writer
+		w.write_leb128(len(self.method_bodies))
 
-			self.writer.write_leb128(len(body["exceptions"]))			
+		for body in self.method_bodies:
+			w.write_leb128(body["method_index"])
+			w.write_leb128(body["max_stack"])
+			w.write_leb128(body["local_count"])
+			w.write_leb128(body["init_scope"])
+			w.write_leb128(body["max_scope"])
+			w.write_leb128(len(body["code"]))
+			w.write_bytes(body["code"])
+
+			w.write_leb128(len(body["exceptions"]))			
 			for exception in body["exceptions"]:
-				self.writer.write_leb128(exception["from"])
-				self.writer.write_leb128(exception["to"])
-				self.writer.write_leb128(exception["target"])
-				self.writer.write_leb128(exception["exc_type"])
-				self.writer.write_leb128(exception["var_name"])
+				w.write_leb128(exception["from"])
+				w.write_leb128(exception["to"])
+				w.write_leb128(exception["target"])
+				w.write_leb128(exception["exc_type"])
+				w.write_leb128(exception["var_name"])
 			
 			self._write_traits(body["traits"])
 	
@@ -156,13 +160,15 @@ class ABCWriter:
 			self._write_trait(trait)
 
 	def _write_trait(self, trait: dict[str, int]):
-		self.writer.write_leb128(self.multiname_pool.index(trait["name"]))
+		self.writer.write_leb128(self._multiname_id_index[id(trait["name"])])
 		self.writer.write_u8(trait["kind"])
 		
 		kind_tag = trait["kind"] & 0x0F
 		if kind_tag in (TRAIT_SLOT, TRAIT_CONST):
 			self.writer.write_leb128(trait["slot_id"])
-			self.writer.write_leb128(self.multiname_pool.index(trait["type_name"]))
+			
+			self.writer.write_leb128(self._multiname_id_index[id(trait["type_name"])])
+
 			self.writer.write_leb128(trait["vindex"])
 			if trait['vindex'] != 0:
 				self.writer.write_u8(trait["vkind"])
@@ -181,7 +187,9 @@ class ABCWriter:
 			instr = stack.next()
 			if instr is None:
 				break
-			
+
+			instr.address = len(writer)
+
 			opcode_val = instr.opcode.value
 			writer.write_u8(opcode_val[0])
 

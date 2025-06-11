@@ -27,6 +27,10 @@ class ABC(ABCReader, ABCWriter):
 		self.string_pool = []
 		self.method_bodies = []
 
+		self._multiname_index: dict[tuple[int, int], int] = {}
+		self._multiname_id_index: dict[dict[str, int], int] = {}
+		self._str_index: dict[str, int] = {}
+
 		ABCReader.__init__(self, data)
 		ABCWriter.__init__(self)
 
@@ -49,8 +53,9 @@ class ABC(ABCReader, ABCWriter):
 
 	def ensure_string(self, s: str) -> int:
 		if s not in self.string_pool:
+			self._str_index[s] = len(self.string_pool)
 			self.string_pool.append(s)
-		return self.string_pool.index(s, 1)
+		return self._str_index[s]
 	
 	def ensure_namespace(self, name: str) -> int:
 		s_index = self.ensure_string(name)
@@ -66,20 +71,22 @@ class ABC(ABCReader, ABCWriter):
 		return len(self.namespace_pool) - 1
 	
 	def ensure_multiname(self, name_index: int, ns_index: int) -> int:
-		for index, multiname in enumerate(self.multiname_pool):
-			if multiname.get("name_index") == name_index and multiname.get("ns_index") == ns_index:
-				return index
-		
-		self.multiname_pool.append({
-			"kind": CONSTANT_QName,
-			"name_index": name_index,
-			"ns_index": ns_index
-		})
-		return len(self.multiname_pool) - 1
+		key = (name_index, ns_index)
+		try:
+			return self._multiname_index[key]
+		except KeyError:
+			idx = len(self.multiname_pool)
+			self.multiname_pool.append({
+				"kind": CONSTANT_QName,
+				"name_index": name_index,
+				"ns_index": ns_index
+			})
+			self._multiname_index[key] = idx
+			return idx
 	
 	def find_multiname(self, prop_name: str, namespace: str = "") -> int | None:
-		prop_s_index = self.string_pool.index(prop_name, 1)
-		ns_s_index = self.string_pool.index(namespace, 1)
+		prop_s_index = self._str_index[prop_name]
+		ns_s_index = self._str_index[namespace]
 
 		for index, multiname in enumerate(self.multiname_pool):
 			if multiname is not None:

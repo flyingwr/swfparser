@@ -37,7 +37,9 @@ class ABCReader:
 		string_count = self.reader.read_leb128()
 		self.string_pool = [""]
 		for _ in range(string_count - 1):
-			self.string_pool.append(self.reader.read_string())
+			s = self.reader.read_string()
+			self._str_index[s] = len(self.string_pool)
+			self.string_pool.append(s)
 
 		ns_count = self.reader.read_leb128()
 		self.namespace_pool = [{
@@ -60,10 +62,12 @@ class ABCReader:
 			self.ns_set_pool.append(indices)
 
 		multiname_count = self.reader.read_leb128()
-		self.multiname_pool = [{
+		st_entry = {
 			"kind": CONSTANT_QName,
-			"name_index": 0
-		}]
+			"name_index": 0,
+		}
+		self.multiname_pool = [st_entry]
+		self._multiname_id_index[id(st_entry)] = 0
 		for _ in range(multiname_count - 1):
 			kind = self.reader.read_u8()
 			entry = {'kind': kind}
@@ -86,6 +90,8 @@ class ABCReader:
 				entry['param_types'] = [self.reader.read_leb128() for _ in range(param_count)]
 			else:
 				raise ValueError(f"Unknown multiname kind: {kind}")
+			
+			self._multiname_id_index[id(entry)] = len(self.multiname_pool)
 			self.multiname_pool.append(entry)
 
 	def _read_method_info(self):
@@ -224,7 +230,7 @@ class ABCReader:
 				'local_count':  local_count,
 				'init_scope':   init_scope,
 				'max_scope':    max_scope,
-				'code':         code_bytes,
+				'code':         code_bytes.tobytes(),
 				'exceptions':   exceptions,
 				'traits':       traits
 			})
@@ -261,17 +267,19 @@ class ABCReader:
 		reader = ByteReader(code)
 		stack = Stack(code_len=len(code))
 
+		get_op = Opcode.from_code
 		while reader.pos < len(code):
-			opcode = reader.read_u8()
-			_opcode = Opcode(opcode)
-			if _opcode is None:
-				raise ValueError(f"Unknown opcode on read: 0x{opcode:02x}")
+			address = reader.pos
+
+			opcode = get_op(reader.read_u8())
+			if opcode is None:
+				raise ValueError(f"Unknown opcode on read: 0x{opcode.name:02x}")
 			
 			arg_types = []
-			if len(_opcode.value) > 1:
-				arg_types.extend(_opcode.value[1:])
+			if len(opcode.value) > 1:
+				arg_types.extend(opcode.value[1:])
 
-			args = []
+			args, targets = [], []
 			for t in arg_types:
 				match t:
 					case "u30":
@@ -284,10 +292,10 @@ class ABCReader:
 						op_off = reader.pos
 						target = reader.read_s24()
 
-						if _opcode.name == "lookupswitch":
-							stack.targets.append(op_off + target)
+						if opcode.name == "lookupswitch":
+							targets.append(op_off + target)
 						else:
-							stack.targets.append(target + reader.pos)
+							targets.append(target + reader.pos)
 
 						args.append(target)
 					case "s24arr":
@@ -296,7 +304,7 @@ class ABCReader:
 						case_count = reader.read_leb128() + 1
 						case_offsets = [reader.read_s24() for _ in range(case_count)]
 
-						stack.targets.extend([op_off + offset for offset in case_offsets])
+						targets.extend([op_off + offset for offset in case_offsets])
 
 						args.append(case_offsets)
 					case "u32":
@@ -306,5 +314,5 @@ class ABCReader:
 					case _:
 						raise ValueError(f"Unknown arg type: {t}")
 				
-			stack.add(Instruction(_opcode, args))
+			stack.add(Instruction(opcode, address, args, targets))
 		return stack
