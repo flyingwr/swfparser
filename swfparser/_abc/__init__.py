@@ -1,9 +1,8 @@
 from .consts import *
+
+from .instruction import Instruction, Opcode, Stack
 from .reader import ABCReader
 from .writer import ABCWriter
-
-from .consts import *
-from .instruction import Instruction, Opcode, Stack
 
 class ABC(ABCReader, ABCWriter):
 	def __init__(self, name: str, flags: int, data: bytes):
